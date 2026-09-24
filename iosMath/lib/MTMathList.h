@@ -77,6 +77,8 @@ typedef NS_ENUM(NSUInteger, MTMathAtomType)
 
     /// A left atom - Left & Right in TeX. We don't need two since we track boundaries separately.
     kMTMathAtomBoundary = 101,
+    /// A delimiter introduced by \middle inside a \left...\right group.
+    kMTMathAtomMiddle = 102,
     
     // Atoms after this are non-math TeX nodes that are still useful in math mode. They do not have
     // the usual structure.
@@ -321,6 +323,8 @@ typedef NS_ENUM(NSUInteger, MTFractionAlignment) {
  then the limits (if present) and displayed like a regular subscript/superscript.
  */
 @property (nonatomic) BOOL limits;
+/// Whether this operator was created by \operatorname or \operatorname*.
+@property (nonatomic) BOOL namedOperator;
 
 @end
 
@@ -338,6 +342,18 @@ typedef NS_ENUM(NSUInteger, MTFractionAlignment) {
 @property (nonatomic, nullable) MTMathAtom* leftBoundary;
 /// The right boundary atom. This must be a node of type kMTMathAtomBoundary
 @property (nonatomic, nullable) MTMathAtom* rightBoundary;
+
+@end
+
+/** A delimiter marker introduced by `\middle` inside a `\left...\right` group. */
+@interface MTMiddle : MTMathAtom
+
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithBoundary:(MTMathAtom*)boundary NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithType:(MTMathAtomType)type value:(NSString*)value;
+
+/// The delimiter boundary. This must be a node of type kMTMathAtomBoundary.
+@property (nonatomic, nonnull) MTMathAtom* boundary;
 
 @end
 
@@ -667,6 +683,8 @@ typedef NS_ENUM(NSUInteger, MTStrikeStyle) {
 @property (nonatomic) MTBoxHAlign hAlign;
 /// Overlay strike drawn across the box; kMTStrikeNone (default) = no strike.
 @property (nonatomic) MTStrikeStyle strikeStyle;
+/// Draw a rectangular frame around the child (`\boxed`).
+@property (nonatomic) BOOL drawFrame;
 
 @end
 

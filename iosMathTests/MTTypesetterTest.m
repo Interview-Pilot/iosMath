@@ -3607,4 +3607,57 @@
     XCTAssertEqualWithAccuracy(botLine, contentBot - padding, 0.01);
 }
 
+- (void)testBoxedAddsMeasuredPadding
+{
+    MTMathBoxDisplay* boxed = (MTMathBoxDisplay*)[self singleDisplayForLaTeX:@"\\boxed{x}"];
+    MTDisplay* plain = [self singleDisplayForLaTeX:@"x"];
+    XCTAssertTrue([boxed isKindOfClass:[MTMathBoxDisplay class]]);
+    XCTAssertTrue(boxed.drawFrame);
+    XCTAssertGreaterThan(boxed.width, plain.width);
+    XCTAssertGreaterThan(boxed.ascent, plain.ascent);
+    XCTAssertGreaterThan(boxed.descent, plain.descent);
+    XCTAssertEqualWithAccuracy(boxed.child.position.x - boxed.position.x,
+                               boxed.contentInset, 0.001);
+}
+
+- (void)testOperatorNameUsesOperatorLayout
+{
+    MTDisplay* display = [self singleDisplayForLaTeX:@"\\operatorname{rank}"];
+    XCTAssertTrue([display isKindOfClass:[MTCTLineDisplay class]]);
+    MTCTLineDisplay* line = (MTCTLineDisplay*)display;
+    XCTAssertEqualObjects(line.attributedString.string, @"rank");
+    XCTAssertFalse(line.hasScript);
+}
+
+- (void)testSubstackUsesCompactTableLayout
+{
+    MTMathListDisplay* display = [self displayForLaTeX:@"\\sum_{\\substack{i=1\\\\j=2}}"];
+    XCTAssertNotNil(display);
+    XCTAssertGreaterThan(display.ascent + display.descent, 0);
+}
+
+- (void)testMiddleMatchesOuterDelimiterScale
+{
+    MTInnerDisplay* inner = (MTInnerDisplay*)[self singleDisplayForLaTeX:@"\\left(\\frac{a}{b}\\middle|x\\right)"];
+    XCTAssertTrue([inner isKindOfClass:[MTInnerDisplay class]]);
+    XCTAssertEqual(inner.inner.subDisplays.count, 3u);
+    MTDisplay* middle = inner.inner.subDisplays[1];
+    MTDisplay* plain = [self singleDisplayForLaTeX:@"|"];
+    XCTAssertGreaterThan(middle.ascent + middle.descent,
+                         plain.ascent + plain.descent);
+    CGFloat outerHeight = inner.leftDelimiter.ascent + inner.leftDelimiter.descent;
+    XCTAssertEqualWithAccuracy(middle.ascent + middle.descent,
+                               outerHeight, 0.1 * outerHeight);
+}
+
+- (void)testBoxedMatrixTypesetsWithoutFallback
+{
+    MTMathBoxDisplay* boxed = (MTMathBoxDisplay*)[self singleDisplayForLaTeX:
+        @"\\boxed{\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}}"];
+    XCTAssertTrue([boxed isKindOfClass:[MTMathBoxDisplay class]]);
+    XCTAssertTrue(boxed.drawFrame);
+    XCTAssertGreaterThan(boxed.width, 0);
+    XCTAssertGreaterThan(boxed.ascent + boxed.descent, 0);
+}
+
 @end

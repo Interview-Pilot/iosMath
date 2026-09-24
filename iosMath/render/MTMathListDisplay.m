@@ -1012,6 +1012,8 @@
                    strikeStyle:(MTStrikeStyle) strikeStyle
                strikeThickness:(CGFloat) strikeThickness
           strikeVerticalOffset:(CGFloat) strikeVerticalOffset
+                     drawFrame:(BOOL) drawFrame
+                  contentInset:(CGFloat) contentInset
                          range:(NSRange) range
 {
     self = [super init];
@@ -1023,9 +1025,12 @@
         _strikeStyle = strikeStyle;
         _strikeThickness = strikeThickness;
         _strikeVerticalOffset = strikeVerticalOffset;
-        self.width   = keepWidth  ? child.width   : 0;
-        self.ascent  = keepHeight ? child.ascent  : 0;
-        self.descent = keepDepth  ? child.descent : 0;
+        _drawFrame = drawFrame;
+        _contentInset = contentInset;
+        CGFloat inset = drawFrame ? contentInset : 0;
+        self.width   = keepWidth  ? child.width + 2 * inset  : 0;
+        self.ascent  = keepHeight ? child.ascent + inset      : 0;
+        self.descent = keepDepth  ? child.descent + inset     : 0;
         self.range = range;
     }
     return self;
@@ -1056,7 +1061,8 @@
             default:                 offset = 0;                     break;  // \rlap
         }
     }
-    self.child.position = CGPointMake(self.position.x + offset, self.position.y);
+    CGFloat inset = self.drawFrame ? self.contentInset : 0;
+    self.child.position = CGPointMake(self.position.x + offset + inset, self.position.y);
 }
 
 static NSValue* MTBoxPointValue(CGPoint p) {
@@ -1112,6 +1118,20 @@ static CGPoint MTBoxPointFromValue(NSValue* v) {
         return;                         // phantom: geometry already flowed up at measure time
     }
     [self.child draw:context];          // child holds its own absolute position (set in setPosition:)
+
+    if (self.drawFrame) {
+        CGContextSaveGState(context);
+        [self.textColor setStroke];
+        CGFloat halfRule = self.strikeThickness / 2;
+        CGRect rect = CGRectMake(self.position.x + halfRule,
+                                 self.position.y - self.descent + halfRule,
+                                 MAX(0, self.width - self.strikeThickness),
+                                 MAX(0, self.ascent + self.descent - self.strikeThickness));
+        MTBezierPath* frame = [MTBezierPath bezierPathWithRect:rect];
+        frame.lineWidth = self.strikeThickness;
+        [frame stroke];
+        CGContextRestoreGState(context);
+    }
 
     NSArray<NSValue*>* points = [self strikeSegmentPoints];
     if (points.count == 0) {

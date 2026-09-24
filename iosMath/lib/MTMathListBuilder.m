@@ -51,6 +51,7 @@ static const NSInteger kMTMaxRecursionDepth = 150;
     int _currentChar;
     NSUInteger _length;
     MTInner* _currentInnerAtom;
+    NSInteger _currentInnerDepth;
     MTEnvProperties* _currentEnv;
     MTFontStyle _currentFontStyle;
     BOOL _spacesAllowed;
@@ -1061,6 +1062,7 @@ static const NSInteger kMTMaxRecursionDepth = 150;
             @"bcancel":   @{@"kW":@YES, @"kH":@YES, @"kD":@YES, @"draw":@YES, @"strike":@(kMTStrikeBackward)},
             @"xcancel":   @{@"kW":@YES, @"kH":@YES, @"kD":@YES, @"draw":@YES, @"strike":@(kMTStrikeCross)},
             @"sout":      @{@"kW":@YES, @"kH":@YES, @"kD":@YES, @"draw":@YES, @"strike":@(kMTStrikeHorizontal)},
+            @"boxed":     @{@"kW":@YES, @"kH":@YES, @"kD":@YES, @"draw":@YES, @"frame":@YES},
         };
     });
     return commands;
@@ -1117,11 +1119,41 @@ static const NSInteger kMTMaxRecursionDepth = 150;
         }
         return frac;
     }
+    if ([command isEqualToString:@"middle"]) {
+        if (!_currentInnerAtom) {
+            [self setError:MTParseErrorMissingLeft message:@"\\middle requires a matching \\left"];
+            return nil;
+        }
+        if (_recursionDepth != _currentInnerDepth) {
+            [self setError:MTParseErrorInvalidCommand
+                   message:@"\\middle must be placed directly inside its matching \\left...\\right group"];
+            return nil;
+        }
+        MTMathAtom* boundary = [self getBoundaryAtom:@"middle"];
+        return boundary ? [[MTMiddle alloc] initWithBoundary:boundary] : nil;
+    }
     MTAccent* accent = [MTMathAtomFactory accentWithName:command];
     if (accent) {
         // The command is an accent
         accent.innerList = [self buildInternal:true];
         return accent;
+    } else if ([command isEqualToString:@"operatorname"]) {
+        BOOL limits = NO;
+        if ([self hasCharacters]) {
+            unichar next = [self getNextCharacter];
+            if (next == '*') {
+                limits = YES;
+            } else {
+                [self unlookCharacter];
+            }
+        }
+        NSString* name = [self readTextArgument];
+        if (!name) {
+            return nil;
+        }
+        MTLargeOperator* op = [[MTLargeOperator alloc] initWithValue:name limits:limits];
+        op.namedOperator = YES;
+        return op;
     } else if ([command isEqualToString:@"sqrt"]) {
         // A sqrt command with one argument
         MTRadical* rad = [MTRadical new];
@@ -1141,22 +1173,26 @@ static const NSInteger kMTMaxRecursionDepth = 150;
     } else if ([command isEqualToString:@"left"]) {
         // Save the current inner while a new one gets built.
         MTInner* oldInner = _currentInnerAtom;
+        NSInteger oldInnerDepth = _currentInnerDepth;
         _currentInnerAtom = [MTInner new];
-        _currentInnerAtom.leftBoundary = [self getBoundaryAtom:@"left"];
-        if (!_currentInnerAtom.leftBoundary) {
-            return nil;
+        _currentInnerDepth = _recursionDepth + 1;
+        @try {
+            _currentInnerAtom.leftBoundary = [self getBoundaryAtom:@"left"];
+            if (!_currentInnerAtom.leftBoundary) {
+                return nil;
+            }
+            _currentInnerAtom.innerList = [self buildInternal:false];
+            if (!_currentInnerAtom.rightBoundary) {
+                // A right node would have set the right boundary so we must be missing the right node.
+                NSString* errorMessage = @"Missing \\right";
+                [self setError:MTParseErrorMissingRight message:errorMessage];
+                return nil;
+            }
+            return _currentInnerAtom;
+        } @finally {
+            _currentInnerAtom = oldInner;
+            _currentInnerDepth = oldInnerDepth;
         }
-        _currentInnerAtom.innerList = [self buildInternal:false];
-        if (!_currentInnerAtom.rightBoundary) {
-            // A right node would have set the right boundary so we must be missing the right node.
-            NSString* errorMessage = @"Missing \\right";
-            [self setError:MTParseErrorMissingRight message:errorMessage];
-            return nil;
-        }
-        // reinstate the old inner atom.
-        MTInner* newInner = _currentInnerAtom;
-        _currentInnerAtom = oldInner;
-        return newInner;
     } else if ([command isEqualToString:@"overline"]) {
         // The overline command has 1 arguments
         MTOverLine* over = [MTOverLine new];
@@ -1213,6 +1249,51 @@ static const NSInteger kMTMaxRecursionDepth = 150;
         }
         MTMathAtom* table = [self buildTable:env argument:argument firstList:nil row:NO];
         return table;
+    } else if ([command isEqualToString:@"substack"]) {
+        if (![self expectCharacter:'{']) {
+            [self setError:MTParseErrorCharacterNotFound message:@"Missing { after \\substack"];
+            return nil;
+        }
+
+        MTEnvProperties* oldEnv = _currentEnv;
+        _currentEnv = [[MTEnvProperties alloc] initWithName:@"substack"];
+        NSMutableArray<NSArray<MTMathList*>*>* rows = [NSMutableArray array];
+        BOOL closed = NO;
+        @try {
+            while ([self hasCharacters]) {
+                NSInteger rowCount = _currentEnv.numRows;
+                NSUInteger start = _currentChar;
+                MTMathList* row = [self buildInternal:NO stopChar:'}'];
+                if (!row) {
+                    return nil;
+                }
+                [rows addObject:@[row]];
+                if (_currentEnv.numRows > rowCount) {
+                    continue;
+                }
+                if (_currentChar > start && _chars[_currentChar - 1] == '}') {
+                    closed = YES;
+                    break;
+                }
+                [self setError:MTParseErrorInvalidNumColumns
+                       message:@"\\substack supports one centered column"];
+                return nil;
+            }
+            if (!closed) {
+                [self setError:MTParseErrorMismatchBraces message:@"Missing closing brace for \\substack"];
+                return nil;
+            }
+            NSError* tableError = nil;
+            MTMathAtom* table = [MTMathAtomFactory tableWithEnvironment:@"substack"
+                                                                   rows:rows
+                                                                  error:&tableError];
+            if (!table) {
+                _error = tableError;
+            }
+            return table;
+        } @finally {
+            _currentEnv = oldEnv;
+        }
     } else if ([command isEqualToString:@"color"] || [command isEqualToString:@"textcolor"]) {
         // \color and its alias \textcolor are 2-argument commands: a color
         // followed by the content group that the color applies to.
@@ -1273,6 +1354,7 @@ static const NSInteger kMTMaxRecursionDepth = 150;
         box.hAlign     = (MTBoxHAlign)[boxSpec[@"hAlign"] unsignedIntegerValue];
         // absent "strike" key → 0 → kMTStrikeNone, so phantom/smash/lap are unaffected
         box.strikeStyle = (MTStrikeStyle)[boxSpec[@"strike"] unsignedIntegerValue];
+        box.drawFrame = [boxSpec[@"frame"] boolValue];
 
         if ([boxSpec[@"synthParen"] boolValue]) {
             // \mathstrut: no argument; synthetic inner list with a single open paren.

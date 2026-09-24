@@ -623,6 +623,10 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
             case kMTMathAtomBoundary:
                 NSAssert(NO, @"A boundary atom should never be inside a mathlist.");
                 break;
+
+            case kMTMathAtomMiddle:
+                NSAssert(NO, @"A middle delimiter should only be typeset by its enclosing inner atom.");
+                break;
                 
             case kMTMathAtomSpace: {
                 // stash the existing layout
@@ -704,6 +708,8 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
                                                                        strikeStyle:boxAtom.strikeStyle
                                                                    strikeThickness:_styleFont.mathTable.fractionRuleThickness
                                                               strikeVerticalOffset:0.55 * _styleFont.mathTable.accentBaseHeight
+                                                                        drawFrame:boxAtom.drawFrame
+                                                                     contentInset:(boxAtom.drawFrame ? 0.2 * _styleFont.fontSize : 0)
                                                                              range:atom.indexRange];
                 display.position = _currentPosition;
                 _currentPosition.x += display.width;   // 0 for vphantom/laps
@@ -2517,11 +2523,34 @@ static const NSInteger kDelimiterShortfallPoints = 5;
 - (MTInnerDisplay*) makeInner:(MTInner*) inner atIndex:(NSUInteger) index
 {
   NSAssert(inner.leftBoundary || inner.rightBoundary, @"Inner should have a boundary to call this function");
-  
-  MTMathListDisplay* innerListDisplay = [MTTypesetter createLineForMathList:inner.innerList font:_font style:_style cramped:_cramped];
+
+  NSMutableArray<MTMathList*>* segments = [NSMutableArray array];
+  NSMutableArray<MTMathAtom*>* middleBoundaries = [NSMutableArray array];
+  NSMutableArray<MTMathAtom*>* currentAtoms = [NSMutableArray array];
+  for (MTMathAtom* atom in inner.innerList.atoms) {
+    if (atom.type == kMTMathAtomMiddle) {
+      [segments addObject:[MTMathList mathListWithAtomsArray:currentAtoms]];
+      [middleBoundaries addObject:((MTMiddle*) atom).boundary];
+      currentAtoms = [NSMutableArray array];
+    } else {
+      [currentAtoms addObject:atom];
+    }
+  }
+  [segments addObject:[MTMathList mathListWithAtomsArray:currentAtoms]];
+
+  NSMutableArray<MTMathListDisplay*>* segmentDisplays = [NSMutableArray arrayWithCapacity:segments.count];
+  CGFloat contentAscent = 0;
+  CGFloat contentDescent = 0;
+  for (MTMathList* segment in segments) {
+    MTMathListDisplay* display = [MTTypesetter createLineForMathList:segment font:_font style:_style cramped:_cramped];
+    [segmentDisplays addObject:display];
+    contentAscent = MAX(contentAscent, display.ascent);
+    contentDescent = MAX(contentDescent, display.descent);
+  }
+
   CGFloat axisHeight = _styleFont.mathTable.axisHeight;
   // delta is the max distance from the axis
-  CGFloat delta = MAX(innerListDisplay.ascent - axisHeight, innerListDisplay.descent + axisHeight);
+  CGFloat delta = MAX(contentAscent - axisHeight, contentDescent + axisHeight);
   CGFloat d1 = (delta / 500) * kDelimiterFactor;  // This represents atleast 90% of the formula
   CGFloat d2 = 2 * delta - kDelimiterShortfallPoints;  // This represents a shortfall of 5pt
   // The size of the delimiter glyph should cover at least 90% of the formula or
@@ -2542,6 +2571,33 @@ static const NSInteger kDelimiterShortfallPoints = 5;
     if (rightGlyph) {
       rightDelimiter = rightGlyph;
     }
+  }
+
+  MTMathListDisplay* innerListDisplay = nil;
+  if (middleBoundaries.count == 0) {
+    innerListDisplay = segmentDisplays.firstObject;
+  } else {
+    NSMutableArray<MTDisplay*>* displays = [NSMutableArray array];
+    CGFloat x = 0;
+    for (NSUInteger i = 0; i < segmentDisplays.count; i++) {
+      MTMathListDisplay* segment = segmentDisplays[i];
+      segment.position = CGPointMake(x, 0);
+      [displays addObject:segment];
+      x += segment.width;
+      if (i < middleBoundaries.count) {
+        MTMathAtom* boundary = middleBoundaries[i];
+        if (boundary.nucleus.length > 0) {
+          MTDisplay* delimiter = [self findGlyphForBoundary:boundary.nucleus withHeight:glyphHeight];
+          if (delimiter) {
+            delimiter.position = CGPointMake(x, 0);
+            [displays addObject:delimiter];
+            x += delimiter.width;
+          }
+        }
+      }
+    }
+    innerListDisplay = [[MTMathListDisplay alloc] initWithDisplays:displays
+                                                             range:NSMakeRange(0, inner.innerList.atoms.count)];
   }
 
   MTInnerDisplay* innerDisplay = [[MTInnerDisplay alloc] initWithInner:innerListDisplay leftDelimiter:leftDelimiter rightDelimiter:rightDelimiter atIndex: index];

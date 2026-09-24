@@ -194,6 +194,8 @@ NS_ASSUME_NONNULL_BEGIN
                    strikeStyle:(MTStrikeStyle) strikeStyle
                strikeThickness:(CGFloat) strikeThickness
           strikeVerticalOffset:(CGFloat) strikeVerticalOffset
+                     drawFrame:(BOOL) drawFrame
+                  contentInset:(CGFloat) contentInset
                          range:(NSRange) range NS_DESIGNATED_INITIALIZER;
 
 @property (nonatomic) MTMathListDisplay* child;
@@ -203,6 +205,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic) MTStrikeStyle strikeStyle;
 @property (nonatomic) CGFloat strikeThickness;
 @property (nonatomic) CGFloat strikeVerticalOffset;   ///< y-offset above baseline for \sout
+@property (nonatomic) BOOL drawFrame;
+@property (nonatomic) CGFloat contentInset;
 
 /// Strike overlay geometry as a flat list of absolute endpoints, consumed
 /// pairwise: each even/odd pair is one stroked segment (moveTo then addLineTo).

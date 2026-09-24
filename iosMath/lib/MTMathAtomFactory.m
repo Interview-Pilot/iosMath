@@ -498,6 +498,19 @@ static const CGFloat kSmallMatrixInterColumnSpacing = 5;
         table.interColumnSpacing = kSmallMatrixInterColumnSpacing;
         table.cellStyle = kMTLineStyleScript;
         return table;
+    } else if ([env isEqualToString:@"substack"]) {
+        if (table.numColumns != 1) {
+            NSString* message = @"substack can only have 1 column";
+            if (error != nil) {
+                *error = [NSError errorWithDomain:MTParseError code:MTParseErrorInvalidNumColumns userInfo:@{ NSLocalizedDescriptionKey : message }];
+            }
+            return nil;
+        }
+        table.interRowAdditionalSpacing = 0;
+        table.interColumnSpacing = 0;
+        table.cellStyle = kMTLineStyleScript;
+        [table setAlignment:kMTColumnAlignmentCenter forColumn:0];
+        return table;
     } else if ([env isEqualToString:@"alignedat"]) {
         // Generalization of the aligned branch to n alignment pairs (2n columns).
         // The parser has already validated numColumns == 2n.

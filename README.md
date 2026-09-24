@@ -125,6 +125,10 @@ support is available in [`SwiftMathExample/MathLabel.swift`](SwiftMathExample/Ma
 * Calculus symbols — limits, derivatives, integrals
 * Big operators (e.g. product, sum)
 * Big delimiters (using `\left` and `\right`)
+* Middle delimiters (using `\middle` inside `\left` and `\right`)
+* Boxed formulae (`\boxed`)
+* Named operators (`\operatorname` and `\operatorname*`)
+* Multiline operator limits (`\substack`)
 * Greek alphabet
 * Combinatorics (`\binom`, `\choose` etc.)
 * Geometry symbols (e.g. angle, congruence etc.)

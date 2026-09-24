@@ -4039,4 +4039,113 @@ static NSArray* getTestDataLargeDelimiters() {
     XCTAssertEqualObjects(latex, @"\\begin{array}{rcl}a&b&c\\end{array}");
 }
 
+- (void)testBoxedParsesAndRoundTrips
+{
+    MTMathList* list = [MTMathListBuilder buildFromString:@"\\boxed{\\frac{a}{b}}"];
+    XCTAssertNotNil(list);
+    XCTAssertEqual(list.atoms.count, 1u);
+    MTMathBox* box = (MTMathBox*)list.atoms[0];
+    XCTAssertTrue(box.drawFrame);
+    XCTAssertTrue(box.drawChild);
+    XCTAssertTrue(box.keepWidth);
+    XCTAssertTrue(box.keepHeight);
+    XCTAssertTrue(box.keepDepth);
+    XCTAssertEqualObjects([MTMathListBuilder mathListToString:list], @"\\boxed{\\frac{a}{b}}");
+}
+
+- (void)testOperatorNameParsesAndRoundTrips
+{
+    MTMathList* list = [MTMathListBuilder buildFromString:@"\\operatorname{rank}_A+\\operatorname*{arg max}_{x}"];
+    XCTAssertNotNil(list);
+    XCTAssertEqual(list.atoms.count, 3u);
+    MTLargeOperator* rank = (MTLargeOperator*)list.atoms[0];
+    MTLargeOperator* argmax = (MTLargeOperator*)list.atoms[2];
+    XCTAssertTrue(rank.namedOperator);
+    XCTAssertFalse(rank.limits);
+    XCTAssertEqualObjects(rank.nucleus, @"rank");
+    XCTAssertTrue(argmax.namedOperator);
+    XCTAssertTrue(argmax.limits);
+    XCTAssertEqualObjects(argmax.nucleus, @"arg max");
+    XCTAssertEqualObjects([MTMathListBuilder mathListToString:list],
+                          @"\\operatorname{rank}_{A}+\\operatorname*{arg max}_{x}");
+}
+
+- (void)testSubstackParsesAndRoundTrips
+{
+    MTMathList* list = [MTMathListBuilder buildFromString:@"\\sum_{\\substack{i=1\\\\j=2}} x"];
+    XCTAssertNotNil(list);
+    MTLargeOperator* sum = (MTLargeOperator*)list.atoms[0];
+    XCTAssertEqual(sum.subScript.atoms.count, 1u);
+    MTMathTable* table = (MTMathTable*)sum.subScript.atoms[0];
+    XCTAssertEqualObjects(table.environment, @"substack");
+    XCTAssertEqual(table.numRows, 2u);
+    XCTAssertEqual(table.numColumns, 1u);
+    XCTAssertEqual(table.cellStyle, kMTLineStyleScript);
+    XCTAssertEqual([table getAlignmentForColumn:0], kMTColumnAlignmentCenter);
+    XCTAssertEqualObjects([MTMathListBuilder mathListToString:list],
+                          @"\\sum _{\\substack{i=1\\\\ j=2}}x");
+}
+
+- (void)testSubstackRejectsAdditionalColumns
+{
+    NSError* error = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"\\substack{a&b}" error:&error]);
+    XCTAssertEqual(error.code, MTParseErrorInvalidNumColumns);
+}
+
+- (void)testMiddleParsesAndRoundTrips
+{
+    MTMathList* list = [MTMathListBuilder buildFromString:@"\\left\\{ x \\middle| x>0 \\right\\}"];
+    XCTAssertNotNil(list);
+    MTInner* inner = (MTInner*)list.atoms[0];
+    XCTAssertEqual(inner.innerList.atoms.count, 5u);
+    MTMiddle* middle = (MTMiddle*)inner.innerList.atoms[1];
+    XCTAssertEqual(middle.type, kMTMathAtomMiddle);
+    XCTAssertEqualObjects(middle.boundary.nucleus, @"|");
+    XCTAssertEqualObjects([MTMathListBuilder mathListToString:list],
+                          @"\\left\\{ x\\middle| x\\gt 0\\right\\} ");
+}
+
+- (void)testMiddleRequiresLeftRightGroup
+{
+    NSError* error = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"x\\middle|y" error:&error]);
+    XCTAssertEqual(error.code, MTParseErrorMissingLeft);
+}
+
+- (void)testMiddleRejectsNestedArgumentPlacement
+{
+    NSError* error = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"\\left( {a\\middle|b} \\right)" error:&error]);
+    XCTAssertEqual(error.code, MTParseErrorInvalidCommand);
+}
+
+- (void)testBoxedMatrixIntegration
+{
+    NSString* latex = @"\\boxed{\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}}";
+    MTMathList* list = [MTMathListBuilder buildFromString:latex];
+    XCTAssertNotNil(list);
+    MTMathBox* box = (MTMathBox*)list.atoms[0];
+    XCTAssertTrue(box.drawFrame);
+    XCTAssertEqual(box.innerList.atoms.count, 1u);
+    XCTAssertTrue([box.innerList.atoms[0] isKindOfClass:[MTInner class]]);
+    XCTAssertEqualObjects([MTMathListBuilder mathListToString:list],
+                          @"\\boxed{\\left( \\begin{matrix}a&b\\\\ c&d\\end{matrix}\\right) }");
+}
+
+- (void)testMissingArgumentsAreParseErrors
+{
+    NSError* boxedError = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"\\boxed{" error:&boxedError]);
+    XCTAssertNotNil(boxedError);
+
+    NSError* operatorError = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"\\operatorname" error:&operatorError]);
+    XCTAssertNotNil(operatorError);
+
+    NSError* substackError = nil;
+    XCTAssertNil([MTMathListBuilder buildFromString:@"\\substack{a\\\\b" error:&substackError]);
+    XCTAssertNotNil(substackError);
+}
+
 @end

@@ -154,6 +154,11 @@ static const NSUInteger kIterationsPerWorker = 200;
         @"\\overset{\\text{def}}{=}",
         @"\\overrightarrow{AB}",
         @"\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+        @"\\boxed{\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}}",
+        @"\\operatorname{rank}(A)",
+        @"\\sum_{\\substack{i=1\\\\j=2}} x_{ij}",
+        @"\\operatorname*{arg max}_{x} f(x)",
+        @"\\left\\{ x \\middle| x > 0 \\right\\}",
     ];
 
     dispatch_group_t group = dispatch_group_create();

@@ -1,5 +1,8 @@
 ## Changelog
 
+### Unreleased
+* Add native support for `\boxed`, `\operatorname`, `\operatorname*`, `\substack`, and `\middle`.
+
 ### v2.5.0 (2026-07-14)
 * Add the LaTeX **`array` environment**: `\begin{array}{lcr}…\end{array}` with per-column alignment, `|` column rules, and `\hline` row rules (#251, #253, #254).
 * Add more matrix and alignment environments: `smallmatrix`, `gathered`, and `alignedat` (#246, #248).
@@ -154,4 +157,3 @@ This release contains backwards incompatible API changes.
 
 ### v0.6.0 (2016-05-12)
 * Inital public release.
-

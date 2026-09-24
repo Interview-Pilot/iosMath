@@ -72,6 +72,8 @@ static NSString* typeToText(MTMathAtomType type) {
             return @"Ord Group";
         case kMTMathAtomBoundary:
             return @"Boundary";
+        case kMTMathAtomMiddle:
+            return @"Middle";
         case kMTMathAtomSpace:
             return @"Space";
         case kMTMathAtomStyle:
@@ -162,6 +164,9 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
 
         case kMTMathAtomOrdGroup:
             return [[MTMathGroup alloc] init];
+
+        case kMTMathAtomMiddle:
+            return [[MTMiddle alloc] initWithType:type value:value];
 
         case kMTMathAtomSpace:
             return [[MTMathSpace alloc] initWithSpace:0];
@@ -512,17 +517,75 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
 {
     MTLargeOperator* op = [super copyWithZone:zone];
     op->_limits = self.limits;
+    op->_namedOperator = self.namedOperator;
     return op;
 }
 
 - (void)appendLaTeXToString:(NSMutableString *)str
 {
+    if (self.namedOperator) {
+        [str appendFormat:(self.limits ? @"\\operatorname*{%@}" : @"\\operatorname{%@}"), self.nucleus];
+        return;
+    }
     NSString* command = [MTMathAtomFactory latexSymbolNameForAtom:self];
     MTLargeOperator* originalOp = (MTLargeOperator*) [MTMathAtomFactory atomForLatexSymbolName:command];
     [str appendFormat:@"\\%@ ", command];
     if (originalOp.limits != self.limits) {
         [str appendString:(self.limits ? @"\\limits " : @"\\nolimits ")];
     }
+}
+
+@end
+
+#pragma mark - MTMiddle
+
+@implementation MTMiddle
+
+- (instancetype)initWithBoundary:(MTMathAtom*)boundary
+{
+    if (!boundary || boundary.type != kMTMathAtomBoundary) {
+        @throw [NSException exceptionWithName:@"InvalidArgument"
+                                       reason:@"Middle delimiter must be of type kMTMathAtomBoundary"
+                                     userInfo:nil];
+    }
+    self = [super initWithType:kMTMathAtomMiddle value:@""];
+    if (self) {
+        _boundary = boundary;
+    }
+    return self;
+}
+
+- (instancetype)initWithType:(MTMathAtomType)type value:(NSString*)value
+{
+    if (type == kMTMathAtomMiddle) {
+        MTMathAtom* boundary = [[MTMathAtom alloc] initWithType:kMTMathAtomBoundary value:value ?: @""];
+        return [self initWithBoundary:boundary];
+    }
+    @throw [NSException exceptionWithName:@"InvalidMethod"
+                                   reason:@"[MTMiddle initWithType:value:] cannot be called. Use [MTMiddle initWithBoundary:] instead."
+                                 userInfo:nil];
+}
+
+- (void)setBoundary:(MTMathAtom*)boundary
+{
+    if (!boundary || boundary.type != kMTMathAtomBoundary) {
+        @throw [NSException exceptionWithName:@"InvalidArgument"
+                                       reason:@"Middle delimiter must be of type kMTMathAtomBoundary"
+                                     userInfo:nil];
+    }
+    _boundary = boundary;
+}
+
+- (id)copyWithZone:(NSZone*)zone
+{
+    MTMiddle* middle = [super copyWithZone:zone];
+    middle.boundary = [self.boundary copyWithZone:zone];
+    return middle;
+}
+
+- (void)appendLaTeXToString:(NSMutableString*)str
+{
+    [str appendFormat:@"\\middle%@ ", [MTMathListBuilder delimToString:self.boundary]];
 }
 
 @end
@@ -1031,6 +1094,9 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
 // picked from the flag matrix. Shared by stringValue and appendLaTeXToString:.
 - (NSString *)latexCommand
 {
+    if (self.drawFrame) {
+        return @"\\boxed";
+    }
     if (self.strikeStyle != kMTStrikeNone) {
         switch (self.strikeStyle) {
             case kMTStrikeForward:    return @"\\cancel";
@@ -1090,6 +1156,7 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
     op->_drawChild = self.drawChild;
     op->_hAlign = self.hAlign;
     op->_strikeStyle = self.strikeStyle;
+    op->_drawFrame = self.drawFrame;
     return op;
 }
 
@@ -1309,8 +1376,11 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
 
 - (void)appendLaTeXToString:(NSMutableString *)str
 {
+    BOOL isSubstack = [self.environment isEqualToString:@"substack"];
     BOOL isArray = [self.environment isEqualToString:@"array"];
-    if (self.environment) {
+    if (isSubstack) {
+        [str appendString:@"\\substack{"];
+    } else if (self.environment) {
         [str appendFormat:@"\\begin{%@}", self.environment];
         if ([self.environment isEqualToString:@"alignedat"]) {
             [str appendFormat:@"{%ld}", (long) (self.numColumns / 2)];
@@ -1360,7 +1430,9 @@ static NSString* fractionCommandForDelimiterPair(NSString* leftDelimiter, NSStri
             [str appendString:@"\\hline "];
         }
     }
-    if (self.environment) {
+    if (isSubstack) {
+        [str appendString:@"}"];
+    } else if (self.environment) {
         [str appendFormat:@"\\end{%@}", self.environment];
     }
 }
