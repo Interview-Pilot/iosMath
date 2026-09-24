@@ -467,6 +467,48 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
 
 #pragma mark - MTTypesetter
 
+// A zero-width marker used only while laying out the contents of a
+// \left...\middle...\right group. Keeping it in the single display pass lets
+// style changes flow across \middle; makeInner: replaces it with the sized
+// delimiter after the content height is known.
+@interface MTMiddleDelimiterPlaceholder : MTDisplay
+
+@property (nonatomic, readonly) MTMiddle* middle;
+
+- (instancetype)initWithMiddle:(MTMiddle*)middle position:(CGPoint)position;
+
+@end
+
+@implementation MTMiddleDelimiterPlaceholder
+
+- (instancetype)initWithMiddle:(MTMiddle*)middle position:(CGPoint)position
+{
+    self = [super init];
+    if (self) {
+        _middle = middle;
+        self.position = position;
+        self.range = middle.indexRange;
+        self.width = 0;
+        self.ascent = 0;
+        self.descent = 0;
+    }
+    return self;
+}
+
+@end
+
+
+@interface MTTypesetter ()
+
++ (MTMathListDisplay*)createLineForMathList:(MTMathList*)mathList
+                                      font:(MTFont*)font
+                                     style:(MTLineStyle)style
+                                   cramped:(BOOL)cramped
+                                    spaced:(BOOL)spaced
+                    allowsMiddleDelimiters:(BOOL)allowsMiddleDelimiters;
+
+@end
+
 @implementation MTTypesetter {
     MTFont* _font;
     NSMutableArray<MTDisplay *>* _displayAtoms;
@@ -478,6 +520,7 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
     MTFont* _styleFont;
     BOOL _cramped;
     BOOL _spaced;
+    BOOL _allowsMiddleDelimiters;
 }
 
 + (MTMathListDisplay *)createLineForMathList:(MTMathList *)mathList font:(MTFont*)font style:(MTLineStyle)style
@@ -496,9 +539,26 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
 // Internal
 + (MTMathListDisplay *)createLineForMathList:(MTMathList *)mathList font:(MTFont*)font style:(MTLineStyle)style cramped:(BOOL) cramped spaced:(BOOL) spaced
 {
+    return [self createLineForMathList:mathList
+                                  font:font
+                                 style:style
+                               cramped:cramped
+                                spaced:spaced
+                allowsMiddleDelimiters:NO];
+}
+
+// Internal
++ (MTMathListDisplay*)createLineForMathList:(MTMathList*)mathList
+                                      font:(MTFont*)font
+                                     style:(MTLineStyle)style
+                                   cramped:(BOOL)cramped
+                                    spaced:(BOOL)spaced
+                    allowsMiddleDelimiters:(BOOL)allowsMiddleDelimiters
+{
     NSParameterAssert(font);
     NSArray* preprocessedAtoms = [self preprocessMathList:mathList];
     MTTypesetter *typesetter = [[MTTypesetter alloc] initWithFont:font style:style cramped:cramped spaced:spaced];
+    typesetter->_allowsMiddleDelimiters = allowsMiddleDelimiters;
     [typesetter createDisplayAtoms:preprocessedAtoms];
     MTMathAtom* lastAtom = mathList.atoms.lastObject;
     MTMathListDisplay* line = [[MTMathListDisplay alloc] initWithDisplays:typesetter->_displayAtoms range:NSMakeRange(0, NSMaxRange(lastAtom.indexRange))];
@@ -624,9 +684,25 @@ static void getBboxDetails(CGRect bbox, CGFloat* ascent, CGFloat* descent)
                 NSAssert(NO, @"A boundary atom should never be inside a mathlist.");
                 break;
 
-            case kMTMathAtomMiddle:
-                NSAssert(NO, @"A middle delimiter should only be typeset by its enclosing inner atom.");
-                break;
+            case kMTMathAtomMiddle: {
+                NSAssert(_allowsMiddleDelimiters, @"A middle delimiter should only be typeset by its enclosing inner atom.");
+                if (!_allowsMiddleDelimiters) {
+                    continue;
+                }
+                if (_currentLine.length > 0) {
+                    [self addDisplayLine];
+                }
+                MTMiddleDelimiterPlaceholder* placeholder =
+                    [[MTMiddleDelimiterPlaceholder alloc] initWithMiddle:(MTMiddle*)atom
+                                                                position:_currentPosition];
+                [_displayAtoms addObject:placeholder];
+
+                // A middle delimiter separates two independently-spaced math-list
+                // segments, but it must not reset the active style.
+                prevNode = nil;
+                lastType = 0;
+                continue;
+            }
                 
             case kMTMathAtomSpace: {
                 // stash the existing layout
@@ -2524,29 +2600,15 @@ static const NSInteger kDelimiterShortfallPoints = 5;
 {
   NSAssert(inner.leftBoundary || inner.rightBoundary, @"Inner should have a boundary to call this function");
 
-  NSMutableArray<MTMathList*>* segments = [NSMutableArray array];
-  NSMutableArray<MTMathAtom*>* middleBoundaries = [NSMutableArray array];
-  NSMutableArray<MTMathAtom*>* currentAtoms = [NSMutableArray array];
-  for (MTMathAtom* atom in inner.innerList.atoms) {
-    if (atom.type == kMTMathAtomMiddle) {
-      [segments addObject:[MTMathList mathListWithAtomsArray:currentAtoms]];
-      [middleBoundaries addObject:((MTMiddle*) atom).boundary];
-      currentAtoms = [NSMutableArray array];
-    } else {
-      [currentAtoms addObject:atom];
-    }
-  }
-  [segments addObject:[MTMathList mathListWithAtomsArray:currentAtoms]];
-
-  NSMutableArray<MTMathListDisplay*>* segmentDisplays = [NSMutableArray arrayWithCapacity:segments.count];
-  CGFloat contentAscent = 0;
-  CGFloat contentDescent = 0;
-  for (MTMathList* segment in segments) {
-    MTMathListDisplay* display = [MTTypesetter createLineForMathList:segment font:_font style:_style cramped:_cramped];
-    [segmentDisplays addObject:display];
-    contentAscent = MAX(contentAscent, display.ascent);
-    contentDescent = MAX(contentDescent, display.descent);
-  }
+  MTMathListDisplay* contentDisplay =
+      [MTTypesetter createLineForMathList:inner.innerList
+                                     font:_font
+                                    style:_style
+                                  cramped:_cramped
+                                   spaced:NO
+                   allowsMiddleDelimiters:YES];
+  CGFloat contentAscent = contentDisplay.ascent;
+  CGFloat contentDescent = contentDisplay.descent;
 
   CGFloat axisHeight = _styleFont.mathTable.axisHeight;
   // delta is the max distance from the axis
@@ -2573,31 +2635,35 @@ static const NSInteger kDelimiterShortfallPoints = 5;
     }
   }
 
-  MTMathListDisplay* innerListDisplay = nil;
-  if (middleBoundaries.count == 0) {
-    innerListDisplay = segmentDisplays.firstObject;
-  } else {
-    NSMutableArray<MTDisplay*>* displays = [NSMutableArray array];
-    CGFloat x = 0;
-    for (NSUInteger i = 0; i < segmentDisplays.count; i++) {
-      MTMathListDisplay* segment = segmentDisplays[i];
-      segment.position = CGPointMake(x, 0);
-      [displays addObject:segment];
-      x += segment.width;
-      if (i < middleBoundaries.count) {
-        MTMathAtom* boundary = middleBoundaries[i];
-        if (boundary.nucleus.length > 0) {
-          MTDisplay* delimiter = [self findGlyphForBoundary:boundary.nucleus withHeight:glyphHeight];
-          if (delimiter) {
-            delimiter.position = CGPointMake(x, 0);
-            [displays addObject:delimiter];
-            x += delimiter.width;
-          }
-        }
-      }
+  NSMutableArray<MTDisplay*>* displays = [NSMutableArray arrayWithCapacity:contentDisplay.subDisplays.count];
+  CGFloat insertedWidth = 0;
+  BOOL foundMiddle = NO;
+  for (MTDisplay* display in contentDisplay.subDisplays) {
+    if (![display isKindOfClass:[MTMiddleDelimiterPlaceholder class]]) {
+      display.position = CGPointMake(display.position.x + insertedWidth, display.position.y);
+      [displays addObject:display];
+      continue;
     }
+
+    foundMiddle = YES;
+    MTMiddleDelimiterPlaceholder* placeholder = (MTMiddleDelimiterPlaceholder*)display;
+    MTMathAtom* boundary = placeholder.middle.boundary;
+    if (boundary.nucleus.length == 0) {
+      continue;
+    }
+    MTDisplay* delimiter = [self findGlyphForBoundary:boundary.nucleus withHeight:glyphHeight];
+    if (delimiter) {
+      delimiter.range = placeholder.range;
+      delimiter.position = CGPointMake(placeholder.position.x + insertedWidth, placeholder.position.y);
+      [displays addObject:delimiter];
+      insertedWidth += delimiter.width;
+    }
+  }
+
+  MTMathListDisplay* innerListDisplay = contentDisplay;
+  if (foundMiddle) {
     innerListDisplay = [[MTMathListDisplay alloc] initWithDisplays:displays
-                                                             range:NSMakeRange(0, inner.innerList.atoms.count)];
+                                                             range:contentDisplay.range];
   }
 
   MTInnerDisplay* innerDisplay = [[MTInnerDisplay alloc] initWithInner:innerListDisplay leftDelimiter:leftDelimiter rightDelimiter:rightDelimiter atIndex: index];

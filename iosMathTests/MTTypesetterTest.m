@@ -3650,6 +3650,35 @@
                                outerHeight, 0.1 * outerHeight);
 }
 
+- (void)testMiddlePreservesStyleAcrossDelimiter
+{
+    MTInnerDisplay* inner = (MTInnerDisplay*)[self singleDisplayForLaTeX:
+        @"\\left(\\scriptstyle a\\middle|b\\right)"];
+    XCTAssertTrue([inner isKindOfClass:[MTInnerDisplay class]]);
+    XCTAssertEqual(inner.inner.subDisplays.count, 3u);
+
+    MTDisplay* beforeMiddle = inner.inner.subDisplays[0];
+    MTDisplay* afterMiddle = inner.inner.subDisplays[2];
+    MTDisplay* scriptStyleA = [self singleDisplayForLaTeX:@"\\scriptstyle a"];
+    MTDisplay* scriptStyleB = [self singleDisplayForLaTeX:@"\\scriptstyle b"];
+    MTDisplay* displayStyleB = [self singleDisplayForLaTeX:@"b"];
+    XCTAssertEqualWithAccuracy(beforeMiddle.ascent, scriptStyleA.ascent, 0.01);
+    XCTAssertEqualWithAccuracy(beforeMiddle.width, scriptStyleA.width, 0.01);
+    XCTAssertEqualWithAccuracy(afterMiddle.ascent, scriptStyleB.ascent, 0.01);
+    XCTAssertEqualWithAccuracy(afterMiddle.width, scriptStyleB.width, 0.01);
+    XCTAssertLessThan(afterMiddle.width, displayStyleB.width);
+}
+
+- (void)testMiddlePreservesFullSourceRange
+{
+    MTInnerDisplay* inner = (MTInnerDisplay*)[self singleDisplayForLaTeX:
+        @"\\left(123\\middle|456\\right)"];
+    XCTAssertTrue([inner isKindOfClass:[MTInnerDisplay class]]);
+    XCTAssertEqualNSRange(inner.inner.range, NSMakeRange(0, 7));
+    XCTAssertEqual(inner.inner.subDisplays.count, 3u);
+    XCTAssertEqualNSRange(inner.inner.subDisplays[1].range, NSMakeRange(3, 1));
+}
+
 - (void)testBoxedMatrixTypesetsWithoutFallback
 {
     MTMathBoxDisplay* boxed = (MTMathBoxDisplay*)[self singleDisplayForLaTeX:
